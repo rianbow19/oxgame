@@ -166,17 +166,6 @@
     min-height: 18px;
   }
 
-  .mark-badge{
-    display:inline-block;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    font-size: 12px;
-    border: 1px solid var(--grid-line);
-    border-radius: 999px;
-    padding: 3px 12px;
-    color: var(--ink-dim);
-    margin-bottom: 14px;
-  }
-
   /* ---------- Shared level/progress UI (AI screen) ---------- */
   .progress-track{ display:flex; align-items:center; justify-content:center; gap: 6px; margin-bottom: 10px; }
   .progress-track .step{ width: 20px; height: 4px; border-radius: 2px; background: var(--grid-line); }
@@ -210,6 +199,38 @@
     font-size: 12.5px; color: var(--ink-dim); min-height: 32px; line-height: 1.5; margin: 0;
   }
 
+  /* ---------- Versus row (AI screen): player left, boss right ---------- */
+  .versus{
+    display:grid; grid-template-columns: 1fr auto 1fr; align-items:center;
+    gap: 10px; margin-bottom: 14px;
+  }
+  .fighter{
+    display:flex; flex-direction: column; align-items:center; gap: 6px;
+    opacity: 0.55; transition: opacity 0.2s ease;
+  }
+  .fighter.turn, .fighter.winner{ opacity: 1; }
+  .portrait{
+    width: clamp(76px, 24vw, 104px); aspect-ratio: 1 / 1;
+    border-radius: 14px; overflow: hidden;
+    background: radial-gradient(circle at 50% 35%, #262a35 0%, var(--panel) 70%);
+    border: 1px solid var(--grid-line);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  .portrait svg{ display:block; width:100%; height:100%; }
+  .fighter.turn .portrait{ border-color: var(--accent); box-shadow: 0 0 0 3px rgba(227,179,65,0.15); }
+  .fighter.winner .portrait{ border-color: var(--win); box-shadow: 0 0 0 3px rgba(111,168,160,0.22); }
+  .fighter.defeated .portrait svg{ filter: grayscale(1); opacity: 0.45; }
+  .fighter-name{
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 12.5px; color: var(--ink-dim);
+  }
+  .fighter-name b{ font-weight: 600; }
+  .fighter[data-mark="X"] .fighter-name b{ color: var(--x-color); }
+  .fighter[data-mark="O"] .fighter-name b{ color: var(--o-color); }
+  .vs{ font-size: 18px; font-style: italic; color: var(--accent); letter-spacing: 0.05em; }
+  .boss .float{ animation: float 3.2s ease-in-out infinite; }
+  @keyframes float{ 50%{ transform: translateY(-3px); } }
+
   .status{
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     font-size: 15px; min-height: 22px; margin-bottom: 18px;
@@ -218,7 +239,9 @@
   /* ---------- Board (shared look, used by both screens) ---------- */
   .board{
     display:grid;
-    grid-template-columns: repeat(3, 1fr);
+    /* minmax(0, …) keeps every track equal; plain 1fr grows with its content */
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: repeat(3, minmax(0, 1fr));
     gap: 3px;
     background: var(--grid-line);
     border-radius: 6px;
@@ -274,7 +297,9 @@
 
   .hidden{ display:none !important; }
 
-  @media (prefers-reduced-motion: reduce){ .mark{ animation: none !important; } }
+  @media (prefers-reduced-motion: reduce){
+    .mark, .boss .float{ animation: none !important; opacity: 1; transform: none; }
+  }
 </style>
 </head>
 <body>
@@ -309,11 +334,24 @@
       <p class="level-desc" id="levelDesc"></p>
     </div>
 
+    <div class="versus">
+      <div class="fighter" id="playerFighter" data-mark="X">
+        <div class="portrait" id="playerPortrait"></div>
+        <div class="fighter-name"><b>你</b>　X</div>
+      </div>
+      <div class="vs">VS</div>
+      <div class="fighter boss" id="bossFighter" data-mark="O">
+        <div class="portrait" id="bossPortrait"></div>
+        <div class="fighter-name"><b id="bossName"></b>　O</div>
+      </div>
+    </div>
+
     <div class="status" id="status" aria-live="polite"></div>
 
     <div class="board" id="board" role="grid" aria-label="井字棋盤"></div>
 
     <div class="controls">
+      <button class="restart rematch hidden" id="nextLevel" type="button">前往下一關 →</button>
       <button class="restart" id="restart">重新開始這一關</button>
       <button class="link-btn" id="resetProgress" type="button">重設全部進度</button>
     </div>
@@ -330,7 +368,7 @@
     </div>
 
     <div class="online-pane active" id="hostPane">
-      <p class="subtitle" style="margin-bottom:6px;">建立房間後，把房號傳給朋友，由他輸入加入。你會是先手 X。</p>
+      <p class="subtitle" style="margin-bottom:6px;">建立房間後，把房號傳給朋友，由他輸入加入。連線後隨機決定先後手。</p>
       <button class="primary-btn" id="hostCreateBtn" type="button">建立房間</button>
       <div class="room-code-display hidden" id="roomCodeDisplay"></div>
       <div class="online-status-line" id="hostStatusLine"></div>
@@ -338,7 +376,7 @@
     </div>
 
     <div class="online-pane" id="joinPane">
-      <p class="subtitle" style="margin-bottom:6px;">輸入朋友給你的房號加入對戰。你會是後手 O。</p>
+      <p class="subtitle" style="margin-bottom:6px;">輸入朋友給你的房號加入對戰。連線後隨機決定先後手。</p>
       <input class="code-input" id="joinCodeInput" maxlength="4" placeholder="房號" autocomplete="off">
       <button class="primary-btn" id="joinConnectBtn" type="button">加入房間</button>
       <div class="online-status-line" id="joinStatusLine"></div>
@@ -349,7 +387,17 @@
   <div id="onlineGameScreen" class="hidden">
     <div class="back-row"><button class="back-btn" id="onlineGameBackBtn" type="button">← 離開這場對戰</button></div>
     <h1 style="font-size:24px;">玩家對戰</h1>
-    <div class="mark-badge" id="myMarkBadge"></div>
+    <div class="versus">
+      <div class="fighter" id="meFighter">
+        <div class="portrait" id="mePortrait"></div>
+        <div class="fighter-name"><b>你</b>　<span id="meMark"></span></div>
+      </div>
+      <div class="vs">VS</div>
+      <div class="fighter" id="foeFighter">
+        <div class="portrait" id="foePortrait"></div>
+        <div class="fighter-name"><b>對手</b>　<span id="foeMark"></span></div>
+      </div>
+    </div>
 
     <div class="status" id="onlineStatus" aria-live="polite"></div>
 
@@ -434,6 +482,94 @@
     }
   }
 
+  // ================= PORTRAITS =================
+  // Player avatars; each match picks one at random.
+  const PLAYER_ART = [
+    { name: '斗篷旅人', art: `
+      <path d="M18 100 C18 62 27 20 50 20 C73 20 82 62 82 100 Z" fill="#454b60"/>
+      <ellipse cx="50" cy="56" rx="19" ry="20" fill="#ede8de"/>
+      <path d="M31 52 C33 36 42 30 50 30 C58 30 67 36 69 52 C62 44 56 41 50 41 C44 41 38 44 31 52 Z" fill="#454b60"/>
+      <circle cx="43" cy="56" r="2.6" fill="#15161c"/>
+      <circle cx="57" cy="56" r="2.6" fill="#15161c"/>
+      <path d="M44.5 64 q5.5 4.5 11 0" stroke="#15161c" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+      <path d="M26 84 q24 11 48 0 v16 h-48 z" fill="#e3b341"/>` },
+    { name: '小狐狸', art: `
+      <path d="M24 100 Q50 82 76 100 Z" fill="#6fa8a0"/>
+      <path d="M22 20 L42 40 L25 52 Z M78 20 L58 40 L75 52 Z" fill="#e08a4a"/>
+      <path d="M27 29 L37 40 L29 46 Z M73 29 L63 40 L71 46 Z" fill="#3a2a22"/>
+      <ellipse cx="50" cy="58" rx="28" ry="24" fill="#e08a4a"/>
+      <path d="M22 60 Q36 58 50 70 Q64 58 78 60 Q72 82 50 84 Q28 82 22 60 Z" fill="#f4ede0"/>
+      <path d="M35 54 q5 -4 10 0 M55 54 q5 -4 10 0" stroke="#2a1d16" stroke-width="3" fill="none" stroke-linecap="round"/>
+      <ellipse cx="50" cy="70" rx="3.6" ry="2.6" fill="#2a1d16"/>` },
+    { name: '灰貓', art: `
+      <path d="M22 100 Q50 84 78 100 Z" fill="#5b5f6b"/>
+      <path d="M24 22 L43 40 L23 50 Z M76 22 L57 40 L77 50 Z" fill="#8b8f9c"/>
+      <path d="M28 31 L37 40 L28 45 Z M72 31 L63 40 L72 45 Z" fill="#e8a7b0"/>
+      <ellipse cx="50" cy="59" rx="28" ry="24" fill="#8b8f9c"/>
+      <ellipse cx="40" cy="56" rx="4.6" ry="5.6" fill="#b7e07a"/><ellipse cx="40" cy="56" rx="1.5" ry="4.4" fill="#15161c"/>
+      <ellipse cx="60" cy="56" rx="4.6" ry="5.6" fill="#b7e07a"/><ellipse cx="60" cy="56" rx="1.5" ry="4.4" fill="#15161c"/>
+      <path d="M47 64 h6 l-3 3.4 z" fill="#e8a7b0"/>
+      <path d="M50 67 q-3 4 -6.5 2 M50 67 q3 4 6.5 2" stroke="#15161c" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+      <path d="M30 64 l-10 -2 M30 68 l-10 2 M70 64 l10 -2 M70 68 l10 2" stroke="#d6d8de" stroke-width="1.3" stroke-linecap="round"/>` },
+    { name: '小魔法師', art: `
+      <path d="M20 100 Q50 76 80 100 Z" fill="#4b5fa8"/>
+      <circle cx="50" cy="62" r="17" fill="#f1d9c0"/>
+      <path d="M33 64 Q50 102 67 64 Q58 74 50 74 Q42 74 33 64 Z" fill="#ede8de"/>
+      <circle cx="44" cy="60" r="2.4" fill="#15161c"/>
+      <circle cx="56" cy="60" r="2.4" fill="#15161c"/>
+      <path d="M26 48 L52 4 L74 48 Z" fill="#4b5fa8"/>
+      <ellipse cx="50" cy="48" rx="32" ry="6" fill="#3c4d8c"/>
+      <path d="M52 20 l2 4.5 l4.5 0.6 l-3.3 3 l0.9 4.6 l-4.1 -2.3 l-4.1 2.3 l0.9 -4.6 l-3.3 -3 l4.5 -0.6 z" fill="#e3b341"/>
+      <circle cx="40" cy="36" r="1.6" fill="#e3b341"/><circle cx="62" cy="38" r="1.3" fill="#e3b341"/>` },
+    { name: '白兔', art: `
+      <path d="M24 100 Q50 84 76 100 Z" fill="#c97b6b"/>
+      <ellipse cx="38" cy="26" rx="7.5" ry="21" transform="rotate(-8 38 26)" fill="#ede8de"/>
+      <ellipse cx="62" cy="26" rx="7.5" ry="21" transform="rotate(8 62 26)" fill="#ede8de"/>
+      <ellipse cx="38" cy="27" rx="3.4" ry="15" transform="rotate(-8 38 27)" fill="#e8a7b0"/>
+      <ellipse cx="62" cy="27" rx="3.4" ry="15" transform="rotate(8 62 27)" fill="#e8a7b0"/>
+      <ellipse cx="50" cy="62" rx="25" ry="22" fill="#ede8de"/>
+      <circle cx="41" cy="60" r="3" fill="#7a3b3b"/><circle cx="59" cy="60" r="3" fill="#7a3b3b"/>
+      <circle cx="35" cy="68" r="4" fill="#e8a7b0" opacity="0.6"/><circle cx="65" cy="68" r="4" fill="#e8a7b0" opacity="0.6"/>
+      <path d="M47.5 66 h5 l-2.5 2.8 z" fill="#d48a95"/>
+      <path d="M50 69 q-2.5 3 -5 1.5 M50 69 q2.5 3 5 1.5" stroke="#7a3b3b" stroke-width="1.6" fill="none" stroke-linecap="round"/>` },
+    { name: '熊貓', art: `
+      <path d="M22 100 Q50 84 78 100 Z" fill="#6fa8a0"/>
+      <circle cx="28" cy="36" r="9.5" fill="#1b1d24" stroke="#565a66" stroke-width="1.5"/><circle cx="72" cy="36" r="9.5" fill="#1b1d24" stroke="#565a66" stroke-width="1.5"/>
+      <circle cx="50" cy="60" r="27" fill="#f4f1ea"/>
+      <ellipse cx="39" cy="58" rx="7" ry="9.5" transform="rotate(28 39 58)" fill="#1b1d24"/>
+      <ellipse cx="61" cy="58" rx="7" ry="9.5" transform="rotate(-28 61 58)" fill="#1b1d24"/>
+      <circle cx="40" cy="57" r="2.3" fill="#f4f1ea"/><circle cx="60" cy="57" r="2.3" fill="#f4f1ea"/>
+      <ellipse cx="50" cy="68" rx="4" ry="2.8" fill="#1b1d24"/>
+      <path d="M50 70 q-3 4 -6 2 M50 70 q3 4 6 2" stroke="#1b1d24" stroke-width="1.8" fill="none" stroke-linecap="round"/>` }
+  ];
+  // Shown for the opponent until their avatar arrives.
+  const UNKNOWN_ART = `
+    <path d="M22 100 Q50 80 78 100 Z" fill="#2c2f3a"/>
+    <circle cx="50" cy="52" r="22" fill="#2c2f3a"/>
+    <text x="50" y="61" text-anchor="middle" font-size="26" font-family="sans-serif" fill="#565a66">?</text>`;
+
+  function portraitSvg(art, label, floating){
+    return `<svg viewBox="0 0 100 100" role="img" aria-label="${label}">${floating ? `<g class="float">${art}</g>` : art}</svg>`;
+  }
+  function avatarSvg(i){
+    return i == null ? portraitSvg(UNKNOWN_ART, '對手') : portraitSvg(PLAYER_ART[i].art, PLAYER_ART[i].name);
+  }
+  function randomAvatar(exclude){
+    let i;
+    do{ i = Math.floor(Math.random() * PLAYER_ART.length); } while(i === exclude);
+    return i;
+  }
+
+  // Versus row state. turn / winner: 'left', 'right' or null.
+  function updateVersus(leftEl, rightEl, turn, winner){
+    leftEl.classList.toggle('turn', turn === 'left');
+    rightEl.classList.toggle('turn', turn === 'right');
+    leftEl.classList.toggle('winner', winner === 'left');
+    rightEl.classList.toggle('winner', winner === 'right');
+    leftEl.classList.toggle('defeated', winner === 'right');
+    rightEl.classList.toggle('defeated', winner === 'left');
+  }
+
   // ================= SCREEN SWITCHING =================
   const screens = {
     lobby: document.getElementById('lobbyScreen'),
@@ -447,7 +583,7 @@
 
   document.getElementById('toAiBtn').addEventListener('click', () => {
     showScreen('ai');
-    AI.init();
+    AI.enter();
   });
   document.getElementById('toOnlineBtn').addEventListener('click', () => {
     showScreen('onlineSetup');
@@ -465,22 +601,71 @@
   // ================= AI LADDER MODE =================
   const AI = (function(){
     const LEVELS = [
-      { name: '新手幽靈',   desc: '剛甦醒的幽靈，偶爾會失神，但不會讓你輕易得手。' },
-      { name: '見習棋士',   desc: '穩紮穩打，會擋也會抓機會，鮮少露出破綻。' },
-      { name: '老練棋手',   desc: '懂得布局，會主動製造雙重威脅逼你顧此失彼。' },
-      { name: '棋靈',       desc: '棋盤上的老靈魂，看得穿好幾步之後的局面。' },
-      { name: '太古棋魂',   desc: '算得很深的最終考驗，但依然會露出破綻。' }
+      { name: '新手幽靈',   desc: '剛甦醒的幽靈，還不懂棋子會消散，常被殘影騙過。' },
+      { name: '見習棋士',   desc: '會抓機會也會擋，但只看得到眼前兩三步。' },
+      { name: '老練棋手',   desc: '能預讀好幾步，偶爾失神時只顧眼前。' },
+      { name: '棋靈',       desc: '棋盤上的老靈魂，看得穿多數陷阱，很少分心。' },
+      { name: '太古棋魂',   desc: '洞悉每一個局面，從不失誤。勝機只藏在先手的第一步。' }
     ];
-    const MISTAKE_RATES = [0.30, 0.20, 0.12, 0.07, 0.09];
+
+    // Boss portraits, one per level; the ghost grows more imposing each level.
+    const ghostBody = fill =>
+      `<path d="M22 90 V48 a28 28 0 0 1 56 0 V90 l-9.33 -7 l-9.33 7 l-9.34 -7 l-9.33 7 l-9.33 -7 z" fill="${fill}"/>`;
+    const BOSS_ART = [
+      // 新手幽靈: sleepy, half awake
+      ghostBody('#d9dfea') + `
+        <path d="M35 52 q5.5 4 11 0 M54 52 q5.5 4 11 0" stroke="#2a2d38" stroke-width="3" fill="none" stroke-linecap="round"/>
+        <circle cx="35" cy="61" r="4" fill="#f1b5b5" opacity="0.6"/>
+        <circle cx="65" cy="61" r="4" fill="#f1b5b5" opacity="0.6"/>
+        <ellipse cx="50" cy="66" rx="3" ry="2.4" fill="#2a2d38"/>
+        <text x="74" y="26" font-size="12" font-family="sans-serif" fill="#8b8d99">z</text>
+        <text x="82" y="16" font-size="9" font-family="sans-serif" fill="#8b8d99">z</text>`,
+      // 見習棋士: eager, with a headband
+      ghostBody('#a9d3cc') + `
+        <path d="M23 38 h54" stroke="#c97b6b" stroke-width="5"/>
+        <path d="M76 38 l9 -5 M76 38 l8 4" stroke="#c97b6b" stroke-width="3.5" stroke-linecap="round"/>
+        <circle cx="41" cy="53" r="4.5" fill="#1b1e26"/><circle cx="42.5" cy="51.5" r="1.4" fill="#fff"/>
+        <circle cx="59" cy="53" r="4.5" fill="#1b1e26"/><circle cx="60.5" cy="51.5" r="1.4" fill="#fff"/>
+        <path d="M44 63 q6 5 12 0" stroke="#1b1e26" stroke-width="2.4" fill="none" stroke-linecap="round"/>`,
+      // 老練棋手: monocle and moustache
+      ghostBody('#b8c4dc') + `
+        <path d="M34 44 l10 2 M56 46 l10 -2" stroke="#2a2d38" stroke-width="2.6" stroke-linecap="round"/>
+        <circle cx="41" cy="53" r="3.4" fill="#2a2d38"/>
+        <circle cx="60" cy="53" r="3.4" fill="#2a2d38"/>
+        <circle cx="60" cy="53" r="8" fill="none" stroke="#e3b341" stroke-width="2.2"/>
+        <path d="M67 58 q4 10 -2 22" stroke="#e3b341" stroke-width="1.2" fill="none"/>
+        <path d="M50 63 q-8 -4 -14 2 q8 1 14 -1 q6 2 14 1 q-6 -6 -14 -2 z" fill="#2a2d38"/>`,
+      // 棋靈: glowing, third eye, drifting wisps
+      `<circle cx="50" cy="56" r="44" fill="#8f7fc4" opacity="0.14"/>` + ghostBody('#8f7fc4') + `
+        <circle cx="16" cy="30" r="3" fill="#c9bdf2" opacity="0.7"/>
+        <circle cx="86" cy="44" r="2.4" fill="#c9bdf2" opacity="0.6"/>
+        <circle cx="82" cy="18" r="1.8" fill="#c9bdf2" opacity="0.5"/>
+        <ellipse cx="50" cy="38" rx="4" ry="5.5" fill="#f4efff"/><circle cx="50" cy="38.5" r="2.2" fill="#2b2140"/>
+        <ellipse cx="40" cy="54" rx="4.2" ry="5" fill="#f4efff"/><circle cx="40.5" cy="55" r="2.3" fill="#2b2140"/>
+        <ellipse cx="60" cy="54" rx="4.2" ry="5" fill="#f4efff"/><circle cx="60.5" cy="55" r="2.3" fill="#2b2140"/>
+        <path d="M44 67 q6 3 12 0" stroke="#2b2140" stroke-width="2.2" fill="none" stroke-linecap="round"/>`,
+      // 太古棋魂: dark, crowned, burning eyes
+      `<circle cx="50" cy="58" r="46" fill="#e3b341" opacity="0.1"/>` + ghostBody('#2b2a3a') + `
+        <path d="M22 90 V48 a28 28 0 0 1 56 0 V90" fill="none" stroke="#e3b341" stroke-width="1.4" opacity="0.6"/>
+        <path d="M33 26 l5 -14 l7 9 l5 -12 l5 12 l7 -9 l5 14 z" fill="#e3b341"/>
+        <circle cx="50" cy="20" r="2" fill="#c97b6b"/>
+        <path d="M34 50 l13 5 l-13 3 z M66 50 l-13 5 l13 3 z" fill="#ffd36b"/>
+        <path d="M40 70 l5 -3 l5 3 l5 -3 l5 3" stroke="#e3b341" stroke-width="2" fill="none" stroke-linejoin="round"/>`
+    ];
 
     const boardEl = document.getElementById('board');
     const statusEl = document.getElementById('status');
     const restartBtn = document.getElementById('restart');
+    const nextLevelBtn = document.getElementById('nextLevel');
     const resetProgressBtn = document.getElementById('resetProgress');
     const levelRowEl = document.getElementById('levelRow');
     const progressTrackEl = document.getElementById('progressTrack');
     const levelNameEl = document.getElementById('levelName');
     const levelDescEl = document.getElementById('levelDesc');
+    const playerFighterEl = document.getElementById('playerFighter');
+    const bossFighterEl = document.getElementById('bossFighter');
+    const bossPortraitEl = document.getElementById('bossPortrait');
+    const bossNameEl = document.getElementById('bossName');
 
     let board, queues, gameOver, humanTurn;
     let currentLevelIndex = 0;
@@ -493,11 +678,14 @@
       queues = { X: [], O: [] };
       gameOver = false;
       humanTurn = true;
+      nextLevelBtn.classList.add('hidden');
       if(!built){ buildCellsInto(boardEl, handleCellClick); built = true; }
       renderLevels();
       updateLevelInfo();
       render();
       setStatus('輪到你了，請下 X');
+      // Solve ahead of time (~1s) so the ghost's first move doesn't stall.
+      if(!solved) setTimeout(() => { if(!solved) solved = solveGame(); }, 50);
     }
 
     function renderLevels(){
@@ -533,12 +721,28 @@
       const lvl = LEVELS[currentLevelIndex];
       levelNameEl.textContent = `第 ${currentLevelIndex + 1} / ${LEVELS.length} 關　${lvl.name}`;
       levelDescEl.textContent = lvl.desc;
+      bossNameEl.textContent = lvl.name;
+      bossPortraitEl.innerHTML = portraitSvg(BOSS_ART[currentLevelIndex], lvl.name, true);
+    }
+
+    // Highlights whoever is to move; once the game ends, marks winner and loser.
+    function updateFighters(winner){
+      updateVersus(playerFighterEl, bossFighterEl,
+        gameOver ? null : (humanTurn ? 'left' : 'right'),
+        winner === 'X' ? 'left' : winner === 'O' ? 'right' : null);
+    }
+
+    // Entering from the lobby rolls a new player avatar.
+    function enter(){
+      document.getElementById('playerPortrait').innerHTML = avatarSvg(randomAvatar());
+      init();
     }
 
     function setStatus(text){ statusEl.textContent = text; }
 
     function render(winLine){
       renderBoardInto(boardEl, board, gameOver || !humanTurn, winLine);
+      updateFighters(gameOver && winLine ? board[winLine[0]] : null);
     }
 
     function doMove(idx, player){
@@ -558,6 +762,7 @@
             justUnlocked = LEVELS[unlockedCount - 1].name;
           }
           renderLevels();
+          nextLevelBtn.classList.toggle('hidden', currentLevelIndex + 1 >= unlockedCount);
           if(justUnlocked){
             setStatus(`你打敗了${LEVELS[currentLevelIndex].name}！解鎖『${justUnlocked}』`);
           } else if(currentLevelIndex === LEVELS.length - 1){
@@ -596,149 +801,193 @@
       }
     }
 
-    function getAIMove(b, qs){
-      const empties = emptyCells(b);
-      if(Math.random() < MISTAKE_RATES[currentLevelIndex]){
-        return empties[Math.floor(Math.random() * empties.length)];
-      }
-      switch(currentLevelIndex){
-        case 0: return level1Move(b, qs, empties);
-        case 1: return level2Move(b, qs, empties);
-        case 2: return level3Move(b, qs, empties);
-        case 3: return minimaxMove(b, qs, empties, 5);
-        default: return minimaxMove(b, qs, empties, 6);
-      }
+    // ---------- Exact solution of the game ----------
+    // A position is fully described by each side's queue of marks (oldest
+    // first) plus whose turn it is. Every position reachable from the empty
+    // board (~116k) is solved by retrograde analysis, so each one is known to
+    // be a win or loss for the side to move (with how many plies it takes) or
+    // an endless cycle.
+    let solved = null;
+
+    function encodeQueue(q){
+      return (q[0] ?? 9) * 100 + (q[1] ?? 9) * 10 + (q[2] ?? 9);
+    }
+    function encodeState(X, O, turn){
+      return (turn === 'X' ? 0 : 1000000) + encodeQueue(X) * 1000 + encodeQueue(O);
+    }
+    function pushMark(q, cell){
+      return (q.length >= 3 ? q.slice(1) : q.slice()).concat(cell);
+    }
+    function queueWins(q){
+      return q.length === 3 && LINES.some(line => line.every(i => q.includes(i)));
     }
 
-    function winningMove(b, qs, empties, player){
-      for(const c of empties){
-        const { board: b2 } = place(b, qs, c, player);
-        if(wins(b2, player)) return c;
-      }
-      return null;
-    }
+    function solveGame(){
+      const idOf = new Map();
+      const kids = [];      // kids[s] = child state ids (non-winning moves)
+      const hasWin = [];    // side to move can complete a line right now
+      const todo = [];
 
-    function safeMoves(b, qs, empties){
-      const safe = [];
-      for(const c of empties){
-        const { board: b2, queues: qs2 } = place(b, qs, c, 'O');
-        let dangerous = false;
-        for(const c2 of emptyCells(b2)){
-          const { board: b3 } = place(b2, qs2, c2, 'X');
-          if(wins(b3, 'X')){ dangerous = true; break; }
+      function getId(X, O, turn){
+        const code = encodeState(X, O, turn);
+        let id = idOf.get(code);
+        if(id === undefined){
+          id = kids.length;
+          idOf.set(code, id);
+          kids.push(null);
+          hasWin.push(false);
+          todo.push([id, X, O, turn]);
         }
-        if(!dangerous) safe.push(c);
+        return id;
       }
-      return safe;
-    }
 
-    function pickByPreference(pool){
-      const preference = [4,0,2,6,8,1,3,5,7];
-      for(const p of preference) if(pool.includes(p)) return p;
-      return pool[0];
-    }
+      getId([], [], 'X');
+      while(todo.length){
+        const [id, X, O, turn] = todo.pop();
+        const occupied = new Set([...X, ...O]);
+        const list = [];
+        for(let c = 0; c < 9; c++){
+          if(occupied.has(c)) continue;
+          const mine = pushMark(turn === 'X' ? X : O, c);
+          if(queueWins(mine)){ hasWin[id] = true; continue; }
+          list.push(turn === 'X' ? getId(mine, O, 'O') : getId(X, mine, 'X'));
+        }
+        kids[id] = list;
+      }
 
-    function level1Move(b, qs, empties){
-      const win = winningMove(b, qs, empties, 'O');
-      if(win !== null) return win;
-      const block = winningMove(b, qs, empties, 'X');
-      if(block !== null) return block;
-      return empties[Math.floor(Math.random() * empties.length)];
-    }
+      const n = kids.length;
+      const val = new Int8Array(n);     // 1 = side to move wins, -1 = loses, 0 = endless
+      const dist = new Uint8Array(n);   // plies until the game ends
+      const parents = Array.from({ length: n }, () => []);
+      const remaining = new Int32Array(n);
+      for(let s = 0; s < n; s++){
+        for(const k of kids[s]) parents[k].push(s);
+        remaining[s] = kids[s].length;
+      }
 
-    function level2Move(b, qs, empties){
-      const win = winningMove(b, qs, empties, 'O');
-      if(win !== null) return win;
-      const block = winningMove(b, qs, empties, 'X');
-      if(block !== null) return block;
-      const safe = safeMoves(b, qs, empties);
-      return pickByPreference(safe.length ? safe : empties);
-    }
-
-    function level3Move(b, qs, empties){
-      const win = winningMove(b, qs, empties, 'O');
-      if(win !== null) return win;
-      const block = winningMove(b, qs, empties, 'X');
-      if(block !== null) return block;
-
-      const safe = safeMoves(b, qs, empties);
-      const pool = safe.length ? safe : empties;
-
-      let bestFork = null;
-      let bestThreats = 1;
-      for(const c of pool){
-        const { board: b2 } = place(b, qs, c, 'O');
-        let threats = 0;
-        for(const line of LINES){
-          const vals = line.map(i => b2[i]);
-          if(vals.filter(v => v === 'O').length === 2 && vals.filter(v => v === 'X').length === 0){
-            threats++;
+      // Breadth-first from the end of the game: wins get their shortest
+      // distance, losses their longest.
+      let queue = [];
+      for(let s = 0; s < n; s++){
+        if(hasWin[s]){ val[s] = 1; dist[s] = 1; queue.push(s); }
+      }
+      while(queue.length){
+        const next = [];
+        for(const s of queue){
+          for(const p of parents[s]){
+            if(val[p] !== 0) continue;
+            if(val[s] === -1){
+              val[p] = 1; dist[p] = dist[s] + 1; next.push(p);
+            } else if(--remaining[p] === 0){
+              val[p] = -1; dist[p] = dist[s] + 1; next.push(p);
+            }
           }
         }
-        if(threats > bestThreats){
-          bestThreats = threats;
-          bestFork = c;
-        }
+        queue = next;
       }
-      return bestFork !== null ? bestFork : pickByPreference(pool);
+
+      return function lookup(X, O, turn){
+        const id = idOf.get(encodeState(X, O, turn));
+        return { val: val[id], dist: dist[id] };
+      };
     }
 
-    function evaluateHeuristic(b){
-      let score = 0;
-      for(const line of LINES){
-        const vals = line.map(i => b[i]);
-        const oCount = vals.filter(v => v === 'O').length;
-        const xCount = vals.filter(v => v === 'X').length;
-        if(oCount > 0 && xCount > 0) continue;
-        if(oCount === 2) score += 5;
-        else if(oCount === 1) score += 1;
-        if(xCount === 2) score -= 5;
-        else if(xCount === 1) score -= 1;
-      }
-      if(b[4] === 'O') score += 2;
-      else if(b[4] === 'X') score -= 2;
-      return score;
-    }
+    // ---------- Level AI ----------
+    // horizon: how many plies ahead the ghost can see. Outcomes further away
+    //          than that look like an ordinary, undecided move to it.
+    // lapse:   chance per move that its sight drops to 2 plies (it still
+    //          takes a win and blocks, but misses anything deeper).
+    // cunning: when lost, pick the move that leaves the player the fewest
+    //          winning replies; when undecided, the one with the most traps.
+    // wander:  chance per move that it just drifts to a random cell.
+    // naive:   it does not understand that marks vanish, so it misreads wins
+    //          and threats that involve an oldest mark; it only notices its
+    //          own win with winChance and the player's with blockChance.
+    const LEVEL_PARAMS = [
+      { naive: true, winChance: 1, blockChance: 1 },
+      { horizon: 3, lapse: 0.15 },
+      { horizon: 5, lapse: 0.25 },
+      { horizon: 9, lapse: 0.15 },
+      { horizon: Infinity, cunning: true }
+    ];
 
-    function minimax(b, qs, isAITurn, depth){
-      if(wins(b, 'O')) return 1000 + depth;
-      if(wins(b, 'X')) return -1000 - depth;
-      if(depth === 0) return evaluateHeuristic(b);
+    function getAIMove(b, qs){
+      if(!solved) solved = solveGame();
+      const params = LEVEL_PARAMS[currentLevelIndex];
       const empties = emptyCells(b);
-      if(isAITurn){
-        let best = -Infinity;
-        for(const c of empties){
-          const { board: b2, queues: q2 } = place(b, qs, c, 'O');
-          best = Math.max(best, minimax(b2, q2, false, depth - 1));
-        }
-        return best;
-      } else {
-        let best = Infinity;
-        for(const c of empties){
-          const { board: b2, queues: q2 } = place(b, qs, c, 'X');
-          best = Math.min(best, minimax(b2, q2, true, depth - 1));
-        }
-        return best;
-      }
+      if(Math.random() < (params.wander || 0)) return randomOf(empties);
+      if(params.naive) return naiveMove(b, empties, params);
+      return searchMove(qs.X.map(o => o.index), qs.O.map(o => o.index), empties, params);
     }
 
-    function minimaxMove(b, qs, empties, depth){
-      let bestVal = -Infinity;
-      let bestMoves = [];
-      for(const c of empties){
-        const { board: b2, queues: q2 } = place(b, qs, c, 'O');
-        const val = wins(b2, 'O') ? Infinity : minimax(b2, q2, false, depth);
-        if(val > bestVal){
-          bestVal = val;
-          bestMoves = [c];
-        } else if(val === bestVal){
-          bestMoves.push(c);
-        }
+    function randomOf(list){
+      return list[Math.floor(Math.random() * list.length)];
+    }
+
+    // Sees the board as if marks never vanished.
+    function naiveMove(b, empties, params){
+      const completes = (c, player) => {
+        const b2 = b.slice();
+        b2[c] = player;
+        return wins(b2, player);
+      };
+      if(Math.random() < params.winChance){
+        const win = empties.find(c => completes(c, 'O'));
+        if(win !== undefined) return win;
       }
-      return pickByPreference(bestMoves);
+      if(Math.random() < params.blockChance){
+        const block = empties.find(c => completes(c, 'X'));
+        if(block !== undefined) return block;
+      }
+      return randomOf(empties);
+    }
+
+    // Outcome of O playing `cell`, seen from O: plies until the game ends,
+    // and whether O wins (1), loses (-1) or it never ends (0).
+    function outcomeOf(X, O, cell){
+      const nO = pushMark(O, cell);
+      if(queueWins(nO)) return { val: 1, dist: 1, nO };
+      const r = solved(X, nO, 'X');
+      return { val: -r.val, dist: r.dist + 1, nO };
+    }
+
+    function searchMove(X, O, empties, params){
+      const horizon = Math.random() < (params.lapse || 0) ? Math.min(2, params.horizon) : params.horizon;
+      const scored = empties.map(c => {
+        const o = outcomeOf(X, O, c);
+        let score = 0;
+        if(o.val !== 0 && o.dist <= horizon){
+          // Win as fast as possible, lose as slowly as possible.
+          score = o.val === 1 ? 1000 - o.dist : -1000 + o.dist;
+        }
+        if(params.cunning && o.val !== 1) score += trickiness(X, o.nO, o.val) / 100;
+        return { c, score };
+      });
+      const best = Math.max(...scored.map(s => s.score));
+      return randomOf(scored.filter(s => s.score === best).map(s => s.c));
+    }
+
+    // Among the player's replies: for a lost position, fewer winning replies
+    // is better; for an endless one, more replies that lose is better.
+    function trickiness(X, O, val){
+      const occupied = new Set([...X, ...O]);
+      let good = 0, bad = 0;
+      for(let c = 0; c < 9; c++){
+        if(occupied.has(c)) continue;
+        const nX = pushMark(X, c);
+        if(queueWins(nX)){ bad++; continue; }
+        const r = solved(nX, O, 'O');
+        if(r.val === 1) good++;
+        else if(r.val === -1) bad++;
+      }
+      return val === -1 ? -bad : good;
     }
 
     restartBtn.addEventListener('click', init);
+    nextLevelBtn.addEventListener('click', () => {
+      currentLevelIndex++;
+      init();
+    });
     resetProgressBtn.addEventListener('click', () => {
       currentLevelIndex = 0;
       unlockedCount = 1;
@@ -746,7 +995,7 @@
       init();
     });
 
-    return { init };
+    return { enter };
   })();
 
   // ================= ONLINE (REMOTE P2P) MODE =================
@@ -765,7 +1014,10 @@
 
     const onlineBoardEl = document.getElementById('onlineBoard');
     const onlineStatusEl = document.getElementById('onlineStatus');
-    const myMarkBadge = document.getElementById('myMarkBadge');
+    const meFighterEl = document.getElementById('meFighter');
+    const foeFighterEl = document.getElementById('foeFighter');
+    const mePortraitEl = document.getElementById('mePortrait');
+    const foePortraitEl = document.getElementById('foePortrait');
     const rematchBtn = document.getElementById('rematchBtn');
 
     const ID_PREFIX = 'vttt-';
@@ -778,6 +1030,12 @@
     let board, queues, gameOver, turn;
     let connected = false;
     let built = false;
+    let isHost = false;
+    // The host picks both avatars and, every round, who plays X (X moves
+    // first), then sends them over so the two screens always agree.
+    let avatars = { host: null, guest: null };
+    let inIntro = false;
+    let introTimer = null;
 
     function genCode(){
       let s = '';
@@ -806,7 +1064,7 @@
         }).catch(() => {});
       }
     });
-    rematchBtn.addEventListener('click', () => doRematch(true));
+    rematchBtn.addEventListener('click', requestRematch);
 
     function hostRoom(){
       cleanup();
@@ -826,7 +1084,11 @@
       peer.on('connection', (c) => {
         conn = c;
         setupConnHandlers();
-        conn.on('open', () => startMatch('X'));
+        conn.on('open', () => {
+          isHost = true;
+          enterMatch();
+          hostStartRound();
+        });
       });
 
       peer.on('error', (err) => {
@@ -849,7 +1111,10 @@
       peer.on('open', () => {
         conn = peer.connect(ID_PREFIX + code, { reliable: true });
         setupConnHandlers();
-        conn.on('open', () => startMatch('O'));
+        conn.on('open', () => {
+          isHost = false;
+          enterMatch();
+        });
       });
 
       peer.on('error', (err) => {
@@ -868,7 +1133,11 @@
       conn.on('data', (data) => {
         if(!data) return;
         if(data.type === 'move') receiveMove(data.index);
-        else if(data.type === 'rematch') doRematch(false);
+        else if(data.type === 'start'){
+          avatars = data.avatars;
+          playIntro(data.hostMark === 'X' ? 'O' : 'X');
+        }
+        else if(data.type === 'rematch' && isHost && gameOver && !inIntro) hostStartRound();
       });
       conn.on('close', onOpponentLeft);
       conn.on('error', onOpponentLeft);
@@ -877,26 +1146,93 @@
     function onOpponentLeft(){
       if(!connected) return;
       connected = false;
+      clearTimeout(introTimer);
+      inIntro = false;
       setOnlineStatus('對手已離線');
       rematchBtn.classList.add('hidden');
       renderOnlineBoard();
     }
 
-    function startMatch(mark){
-      myMark = mark;
+    function enterMatch(){
       connected = true;
-      board = Array(9).fill(null);
-      queues = { X: [], O: [] };
-      gameOver = false;
-      turn = 'X';
-      myMarkBadge.textContent = '你是 ' + myMark;
       if(!built){ buildCellsInto(onlineBoardEl, handleCellClick); built = true; }
-      rematchBtn.classList.add('hidden');
-      renderOnlineBoard();
-      setOnlineStatus(isMyTurn() ? '輪到你了' : '等待對手下子…');
       hostCreateBtn.disabled = false;
       joinConnectBtn.disabled = false;
       showScreen('onlineGame');
+      if(!inIntro){
+        // The guest waits here for the host's first 'start' message.
+        resetBoard();
+        renderOnlineBoard();
+        setOnlineStatus('決定先後手…');
+      }
+    }
+
+    function resetBoard(){
+      board = Array(9).fill(null);
+      queues = { X: [], O: [] };
+      gameOver = true;   // no input until the round actually starts
+      turn = 'X';
+      rematchBtn.classList.add('hidden');
+    }
+
+    function hostStartRound(){
+      if(avatars.host === null){
+        const h = randomAvatar();
+        avatars = { host: h, guest: randomAvatar(h) };
+      }
+      const hostMark = Math.random() < 0.5 ? 'X' : 'O';
+      conn.send({ type: 'start', avatars, hostMark });
+      playIntro(hostMark);
+    }
+
+    function showMarks(visible){
+      const foeMark = myMark === 'X' ? 'O' : 'X';
+      meFighterEl.dataset.mark = visible ? myMark : '';
+      foeFighterEl.dataset.mark = visible ? foeMark : '';
+      document.getElementById('meMark').textContent = visible ? myMark : '?';
+      document.getElementById('foeMark').textContent = visible ? foeMark : '?';
+    }
+
+    // Bounces the highlight between the two portraits, slowing down, lands
+    // on whoever moves first, and starts the round 3 seconds in.
+    function playIntro(mark){
+      clearTimeout(introTimer);
+      inIntro = true;
+      myMark = mark;
+      resetBoard();
+      if(!built){ buildCellsInto(onlineBoardEl, handleCellClick); built = true; }
+      showMarks(false);
+      renderOnlineBoard();
+      setOnlineStatus('決定先後手…');
+
+      const delays = [];
+      for(let d = 60, t = 0; t + d <= 2600; t += d, d *= 1.15) delays.push(d);
+      const firstSide = myMark === 'X' ? 'left' : 'right';
+      const otherSide = firstSide === 'left' ? 'right' : 'left';
+      let side = delays.length % 2 === 0 ? firstSide : otherSide;
+      let i = 0, elapsed = 0;
+      const step = () => {
+        updateVersus(meFighterEl, foeFighterEl, side, null);
+        if(i < delays.length){
+          introTimer = setTimeout(() => {
+            elapsed += delays[i++];
+            side = side === 'left' ? 'right' : 'left';
+            step();
+          }, delays[i]);
+          return;
+        }
+        showMarks(true);
+        setOnlineStatus(myMark === 'X' ? '你先手！' : '對手先手');
+        introTimer = setTimeout(beginRound, 3000 - elapsed);
+      };
+      step();
+    }
+
+    function beginRound(){
+      inIntro = false;
+      gameOver = false;
+      renderOnlineBoard();
+      setOnlineStatus(isMyTurn() ? '輪到你了' : '等待對手下子…');
     }
 
     function isMyTurn(){ return connected && !gameOver && turn === myMark; }
@@ -905,6 +1241,15 @@
 
     function renderOnlineBoard(winLine){
       renderBoardInto(onlineBoardEl, board, !isMyTurn(), winLine);
+      renderVersus(winLine ? board[winLine[0]] : null);
+    }
+
+    function renderVersus(winnerMark){
+      mePortraitEl.innerHTML = avatarSvg(isHost ? avatars.host : avatars.guest);
+      foePortraitEl.innerHTML = avatarSvg(isHost ? avatars.guest : avatars.host);
+      const turnSide = connected && !gameOver ? (turn === myMark ? 'left' : 'right') : null;
+      const winnerSide = winnerMark ? (winnerMark === myMark ? 'left' : 'right') : null;
+      updateVersus(meFighterEl, foeFighterEl, turnSide, winnerSide);
     }
 
     function doMove(idx, player){
@@ -946,22 +1291,25 @@
       }
     }
 
-    function doRematch(initiatedLocally){
-      if(!gameOver) return;
-      board = Array(9).fill(null);
-      queues = { X: [], O: [] };
-      gameOver = false;
-      turn = 'X';
-      rematchBtn.classList.add('hidden');
-      renderOnlineBoard();
-      setOnlineStatus(isMyTurn() ? '輪到你了（新的一局）' : '等待對手（新的一局）');
-      if(initiatedLocally && conn && conn.open) conn.send({ type: 'rematch' });
+    // Only the host decides a new round; the guest asks for one.
+    function requestRematch(){
+      if(!gameOver || inIntro || !connected) return;
+      if(isHost){
+        hostStartRound();
+      } else {
+        rematchBtn.classList.add('hidden');
+        setOnlineStatus('準備新的一局…');
+        if(conn && conn.open) conn.send({ type: 'rematch' });
+      }
     }
 
     function cleanup(){
       if(conn){ try{ conn.close(); }catch(e){} conn = null; }
       if(peer){ try{ peer.destroy(); }catch(e){} peer = null; }
       connected = false;
+      clearTimeout(introTimer);
+      inIntro = false;
+      avatars = { host: null, guest: null };
       roomCode = '';
       roomCodeDisplay.classList.add('hidden');
       roomCodeDisplay.textContent = '';
